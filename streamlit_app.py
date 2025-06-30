@@ -354,17 +354,25 @@ def fallback_deep_research(query: str, api_key: str, model: str = "o3-deep-resea
                     'excerpt': final_output[annotation.start_index:annotation.end_index] if annotation.start_index < len(final_output) else ""
                 })
     
-    return {
-        'query': query,
-        'method_used': 'fallback_deep_research',
-        'result': final_output,
-        'metadata': {
+    # Create a simple object that matches expected interface
+    class FallbackResult:
+        def __init__(self, query, method_used, result, metadata):
+            self.query = query
+            self.method_used = method_used
+            self.result = result
+            self.metadata = metadata
+    
+    return FallbackResult(
+        query=query,
+        method_used='fallback_deep_research',
+        result=final_output,
+        metadata={
             'model': model,
             'citations_count': len(citations),
             'citations': citations[:5],  # First 5 for display
             'approach': 'fallback_deep_research'
         }
-    }
+    )
 
 def perform_research(query: str, api_key: str, method: ResearchMethod, model_name: str, custom_system: str, verbose: bool):
     """Perform the research and display results"""
