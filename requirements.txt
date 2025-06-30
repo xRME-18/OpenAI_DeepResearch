@@ -1,0 +1,12 @@
+# Core dependencies for OpenAI Deep Research
+openai-agents>=0.0.19
+openai>=1.88
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+
+# Streamlit web app
+streamlit>=1.29.0
+
+# Additional utilities
+asyncio-compat>=0.1.2
+typing-extensions>=4.0.0
