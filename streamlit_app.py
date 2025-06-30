@@ -15,14 +15,36 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Import your research modules
+# Import your research modules with fallback handling
+MODULES_AVAILABLE = {
+    'interface': False,
+    'deep_api': False,
+    'agents': False
+}
+
 try:
     from openai_research_interface import ResearchInterface, ResearchMethod
-    from openai_deep_research_api import OpenAIDeepResearchAPI
-    from openai_agents_research import DeepResearchSystem
+    MODULES_AVAILABLE['interface'] = True
 except ImportError as e:
-    st.error(f"Import error: {e}")
-    st.error("Make sure all research modules are available.")
+    st.warning(f"Research interface not available: {e}")
+
+try:
+    from openai_deep_research_api import OpenAIDeepResearchAPI
+    MODULES_AVAILABLE['deep_api'] = True
+except ImportError as e:
+    st.warning(f"Deep Research API not available: {e}")
+
+try:
+    from openai_agents_research import DeepResearchSystem
+    MODULES_AVAILABLE['agents'] = True
+except ImportError as e:
+    st.warning(f"OpenAI Agents not available: {e}")
+
+# If no modules are available, show error and basic functionality
+if not any(MODULES_AVAILABLE.values()):
+    st.error("❌ No research modules available. Please check the deployment.")
+    st.info("This may be due to missing dependencies. The app requires openai-agents package which may not be available on Streamlit Cloud.")
+    st.stop()
 
 # Page configuration
 st.set_page_config(
@@ -96,24 +118,34 @@ def main():
         
         st.divider()
         
-        # Method selection
+        # Method selection based on available modules
         st.subheader("🤖 Research Method")
+        
+        available_methods = []
+        method_map = {}
+        
+        if MODULES_AVAILABLE['interface']:
+            available_methods.append("Auto-select (Recommended)")
+            method_map["Auto-select (Recommended)"] = ResearchMethod.AUTO
+            
+        if MODULES_AVAILABLE['agents']:
+            available_methods.append("OpenAI Agents (Fast, 30-60s)")
+            method_map["OpenAI Agents (Fast, 30-60s)"] = ResearchMethod.OPENAI_AGENTS
+            
+        if MODULES_AVAILABLE['deep_api']:
+            available_methods.append("Deep Research API (Comprehensive, 2-5min)")
+            method_map["Deep Research API (Comprehensive, 2-5min)"] = ResearchMethod.DEEP_RESEARCH_API
+        
+        if not available_methods:
+            st.error("No research methods available!")
+            st.stop()
+            
         method_choice = st.selectbox(
             "Choose research approach:",
-            [
-                "Auto-select (Recommended)",
-                "OpenAI Agents (Fast, 30-60s)",
-                "Deep Research API (Comprehensive, 2-5min)"
-            ],
-            help="Auto-select intelligently chooses the best method based on your query."
+            available_methods,
+            help="Available methods based on successfully loaded modules."
         )
         
-        # Convert to enum
-        method_map = {
-            "Auto-select (Recommended)": ResearchMethod.AUTO,
-            "OpenAI Agents (Fast, 30-60s)": ResearchMethod.OPENAI_AGENTS,
-            "Deep Research API (Comprehensive, 2-5min)": ResearchMethod.DEEP_RESEARCH_API
-        }
         selected_method = method_map[method_choice]
         
         st.divider()
