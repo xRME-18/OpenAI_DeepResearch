@@ -15,6 +15,15 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Define fallback classes and enums
+from enum import Enum
+
+class ResearchMethod(Enum):
+    """Available research methods"""
+    AUTO = "auto"
+    OPENAI_AGENTS = "openai_agents"
+    DEEP_RESEARCH_API = "deep_research_api"
+
 # Import your research modules with fallback handling
 MODULES_AVAILABLE = {
     'interface': False,
@@ -22,8 +31,12 @@ MODULES_AVAILABLE = {
     'agents': False
 }
 
+ResearchInterface = None
+OpenAIDeepResearchAPI = None
+DeepResearchSystem = None
+
 try:
-    from openai_research_interface import ResearchInterface, ResearchMethod
+    from openai_research_interface import ResearchInterface
     MODULES_AVAILABLE['interface'] = True
 except ImportError as e:
     st.warning(f"Research interface not available: {e}")
@@ -40,11 +53,20 @@ try:
 except ImportError as e:
     st.warning(f"OpenAI Agents not available: {e}")
 
-# If no modules are available, show error and basic functionality
+# If no modules are available, provide fallback functionality
 if not any(MODULES_AVAILABLE.values()):
-    st.error("❌ No research modules available. Please check the deployment.")
-    st.info("This may be due to missing dependencies. The app requires openai-agents package which may not be available on Streamlit Cloud.")
-    st.stop()
+    st.error("❌ Research modules not available. Using fallback Deep Research API.")
+    st.info("Using simplified Deep Research API functionality.")
+    
+    # Import OpenAI directly for fallback
+    try:
+        from openai import OpenAI
+        FALLBACK_MODE = True
+    except ImportError:
+        st.error("OpenAI package not available. Cannot proceed.")
+        st.stop()
+else:
+    FALLBACK_MODE = False
 
 # Page configuration
 st.set_page_config(
@@ -124,17 +146,24 @@ def main():
         available_methods = []
         method_map = {}
         
-        if MODULES_AVAILABLE['interface']:
-            available_methods.append("Auto-select (Recommended)")
-            method_map["Auto-select (Recommended)"] = ResearchMethod.AUTO
-            
-        if MODULES_AVAILABLE['agents']:
-            available_methods.append("OpenAI Agents (Fast, 30-60s)")
-            method_map["OpenAI Agents (Fast, 30-60s)"] = ResearchMethod.OPENAI_AGENTS
-            
-        if MODULES_AVAILABLE['deep_api']:
-            available_methods.append("Deep Research API (Comprehensive, 2-5min)")
-            method_map["Deep Research API (Comprehensive, 2-5min)"] = ResearchMethod.DEEP_RESEARCH_API
+        if FALLBACK_MODE:
+            # Fallback mode - only Deep Research API available
+            available_methods.append("Deep Research API (Fallback Mode)")
+            method_map["Deep Research API (Fallback Mode)"] = ResearchMethod.DEEP_RESEARCH_API
+            st.info("🔧 Running in fallback mode - using simplified Deep Research API")
+        else:
+            # Normal mode - check what's available
+            if MODULES_AVAILABLE['interface']:
+                available_methods.append("Auto-select (Recommended)")
+                method_map["Auto-select (Recommended)"] = ResearchMethod.AUTO
+                
+            if MODULES_AVAILABLE['agents']:
+                available_methods.append("OpenAI Agents (Fast, 30-60s)")
+                method_map["OpenAI Agents (Fast, 30-60s)"] = ResearchMethod.OPENAI_AGENTS
+                
+            if MODULES_AVAILABLE['deep_api']:
+                available_methods.append("Deep Research API (Comprehensive, 2-5min)")
+                method_map["Deep Research API (Comprehensive, 2-5min)"] = ResearchMethod.DEEP_RESEARCH_API
         
         if not available_methods:
             st.error("No research methods available!")
@@ -268,6 +297,75 @@ def main():
     if research_button and query.strip():
         perform_research(query.strip(), api_key, selected_method, model_name, custom_system, verbose_mode)
 
+def fallback_deep_research(query: str, api_key: str, model: str = "o3-deep-research-2025-06-26") -> dict:
+    """Fallback Deep Research using OpenAI API directly"""
+    from openai import OpenAI
+    
+    client = OpenAI(api_key=api_key, timeout=600.0)
+    
+    # Prepare input messages
+    input_messages = [
+        {
+            "role": "developer", 
+            "content": [{"type": "input_text", "text": "You are a professional researcher. Provide comprehensive, well-cited research."}]
+        },
+        {
+            "role": "user", 
+            "content": [{"type": "input_text", "text": query}]
+        }
+    ]
+    
+    # Configure tools
+    tools = [
+        {"type": "web_search_preview"},
+        {"type": "code_interpreter", "container": {"type": "auto", "file_ids": []}}
+    ]
+    
+    try:
+        # Try with reasoning
+        response = client.responses.create(
+            model=model,
+            input=input_messages,
+            tools=tools,
+            reasoning={"summary": "auto"}
+        )
+    except Exception as e:
+        if "must be verified" in str(e):
+            # Fallback without reasoning
+            response = client.responses.create(
+                model=model,
+                input=input_messages,
+                tools=tools
+            )
+        else:
+            raise e
+    
+    # Extract result
+    final_output = response.output[-1].content[0].text
+    
+    # Extract citations
+    citations = []
+    if hasattr(response.output[-1].content[0], 'annotations'):
+        for annotation in response.output[-1].content[0].annotations:
+            if hasattr(annotation, 'start_index'):
+                citations.append({
+                    'title': getattr(annotation, 'title', 'Unknown Title'),
+                    'url': getattr(annotation, 'url', ''),
+                    'excerpt': final_output[annotation.start_index:annotation.end_index] if annotation.start_index < len(final_output) else ""
+                })
+    
+    return {
+        'query': query,
+        'method_used': 'fallback_deep_research',
+        'result': final_output,
+        'metadata': {
+            'model': model,
+            'citations_count': len(citations),
+            'citations': citations[:5],  # First 5 for display
+            'approach': 'fallback_deep_research'
+        }
+    }
+
 def perform_research(query: str, api_key: str, method: ResearchMethod, model_name: str, custom_system: str, verbose: bool):
     """Perform the research and display results"""
     
@@ -279,39 +377,48 @@ def perform_research(query: str, api_key: str, method: ResearchMethod, model_nam
         status_text.text("🔧 Initializing research system...")
         progress_bar.progress(10)
         
-        # Initialize research interface
-        interface_kwargs = {"deep_research_model": model_name} if model_name else {}
-        interface = ResearchInterface(
-            method=method,
-            api_key=api_key,
-            **interface_kwargs
-        )
-        
-        status_text.text("🚀 Starting research...")
-        progress_bar.progress(25)
-        
-        # Prepare research parameters
-        research_kwargs = {}
-        if custom_system.strip():
-            research_kwargs["system_message"] = custom_system.strip()
-        
         # Start timing
         start_time = time.time()
         
-        # Show method being used
-        if method == ResearchMethod.AUTO:
-            predicted_method = interface._auto_select_method(query)
-            st.info(f"🤖 Auto-selected method: **{predicted_method.value}**")
-        
-        status_text.text(f"🔍 Researching using {method.value}...")
-        progress_bar.progress(50)
-        
-        # Perform research (run async function)
-        result = asyncio.run(interface.research(
-            query=query,
-            verbose=verbose,
-            **research_kwargs
-        ))
+        # Check if we need to use fallback mode
+        if FALLBACK_MODE or not MODULES_AVAILABLE['interface']:
+            status_text.text("🔬 Using fallback Deep Research API...")
+            progress_bar.progress(50)
+            
+            # Use fallback function
+            result = fallback_deep_research(query, api_key, model_name)
+            
+        else:
+            # Initialize research interface
+            interface_kwargs = {"deep_research_model": model_name} if model_name else {}
+            interface = ResearchInterface(
+                method=method,
+                api_key=api_key,
+                **interface_kwargs
+            )
+            
+            status_text.text("🚀 Starting research...")
+            progress_bar.progress(25)
+            
+            # Prepare research parameters
+            research_kwargs = {}
+            if custom_system.strip():
+                research_kwargs["system_message"] = custom_system.strip()
+            
+            # Show method being used
+            if method == ResearchMethod.AUTO:
+                predicted_method = interface._auto_select_method(query)
+                st.info(f"🤖 Auto-selected method: **{predicted_method.value}**")
+            
+            status_text.text(f"🔍 Researching using {method.value}...")
+            progress_bar.progress(50)
+            
+            # Perform research (run async function)
+            result = asyncio.run(interface.research(
+                query=query,
+                verbose=verbose,
+                **research_kwargs
+            ))
         
         # Calculate timing
         end_time = time.time()
